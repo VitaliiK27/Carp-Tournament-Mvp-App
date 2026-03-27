@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+carp_tournament.db
+.venv/
+.env
+.DS_Store
