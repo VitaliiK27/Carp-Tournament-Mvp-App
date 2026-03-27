@@ -1,3 +1,4 @@
+import io
 import os
 from contextlib import closing
 from datetime import datetime
@@ -5,6 +6,11 @@ from datetime import datetime
 import pandas as pd
 import psycopg
 import streamlit as st
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfgen import canvas
 
 FISH_TYPES = ["Короп", "Амур", "Інше"]
 TOURNAMENT_TYPES = {
@@ -567,9 +573,113 @@ def seed_demo_data():
         add_catch(tournament_id, team_map[team_name], caught_at, int(period), fish_type, float(weight))
 
 
+def _fit_text(text: str, font_name: str, font_size: int, max_width: float) -> str:
+    text = str(text)
+    while text and stringWidth(text, font_name, font_size) > max_width:
+        text = text[:-1]
+    return text if text == str(text) else text + "..."
+
+
+def _draw_simple_table(pdf: canvas.Canvas, title: str, df: pd.DataFrame, y: float, page_width: float, page_height: float):
+    left = 15 * mm
+    usable = page_width - 30 * mm
+    pdf.setFont("Helvetica-Bold", 11)
+    pdf.drawString(left, y, title)
+    y -= 7 * mm
+
+    if df.empty:
+        pdf.setFont("Helvetica", 9)
+        pdf.drawString(left, y, "Немає даних")
+        return y - 10 * mm
+
+    max_cols = min(len(df.columns), 6)
+    shown = list(df.columns[:max_cols])
+    table_df = df[shown].copy().head(12)
+    col_w = usable / max_cols
+    row_h = 7 * mm
+
+    pdf.setFillColor(colors.HexColor("#EAEAEA"))
+    pdf.rect(left, y - row_h, usable, row_h, fill=1, stroke=0)
+    pdf.setFillColor(colors.black)
+    pdf.setFont("Helvetica-Bold", 8)
+    for idx, col in enumerate(shown):
+        pdf.drawString(left + idx * col_w + 2, y - 5 * mm, _fit_text(col, "Helvetica-Bold", 8, col_w - 4))
+    y -= row_h
+
+    pdf.setFont("Helvetica", 8)
+    for _, row in table_df.iterrows():
+        if y < 20 * mm:
+            pdf.showPage()
+            pdf.setFont("Helvetica", 8)
+            y = page_height - 20 * mm
+        for idx, col in enumerate(shown):
+            value = row[col]
+            text = _fit_text(value, "Helvetica", 8, col_w - 4)
+            pdf.drawString(left + idx * col_w + 2, y - 5 * mm, str(text))
+        pdf.setStrokeColor(colors.HexColor("#DDDDDD"))
+        pdf.line(left, y - row_h, left + usable, y - row_h)
+        y -= row_h
+
+    return y - 5 * mm
+
+
+def build_results_pdf(tournament_id: int) -> bytes:
+    meta = get_tournament_meta(tournament_id)
+    topN_df, total_df, combo_df = build_results(tournament_id)
+    top_n_value = int(meta.get("top_n", 5))
+    big_fish_df = build_big_fish(tournament_id)
+    period_zone_df = build_period_zone_winners(tournament_id)
+    zone_source = total_df if meta["tournament_type"] == "combo" else topN_df
+    zone_col = "Загальна вага" if meta["tournament_type"] == "combo" else f"Заг. вага по {top_n_value}"
+    zone_df = build_zone_winners(zone_source, zone_col)
+    podium_df = build_podium(topN_df, combo_df, meta["tournament_type"], top_n_value)
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    page_width, page_height = A4
+
+    pdf.setTitle(f"Результати - {meta['name']}")
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(15 * mm, page_height - 20 * mm, meta["name"])
+    pdf.setFont("Helvetica", 10)
+    pdf.drawString(15 * mm, page_height - 28 * mm, f"Тип: {TOURNAMENT_TYPES.get(meta['tournament_type'], meta['tournament_type'])}")
+    pdf.drawString(15 * mm, page_height - 34 * mm, f"Період турніру: {meta['start_at']} - {meta['end_at']}")
+    pdf.drawString(15 * mm, page_height - 40 * mm, f"Крупних риб: {top_n_value} | Період: {meta['period_hours']} год | Мін. вага: {meta['min_weight']} кг")
+
+    y = page_height - 52 * mm
+    y = _draw_simple_table(pdf, f"Таблиця: {top_n_value} крупних риб", topN_df, y, page_width, page_height)
+    if meta["tournament_type"] == "combo":
+        y = _draw_simple_table(pdf, "Таблиця: загальна вага", total_df, y, page_width, page_height)
+        y = _draw_simple_table(pdf, "Залік по сумі місць", combo_df, y, page_width, page_height)
+    y = _draw_simple_table(pdf, "Подіум", podium_df, y, page_width, page_height)
+    y = _draw_simple_table(pdf, "Big Fish", big_fish_df, y, page_width, page_height)
+
+    pdf.showPage()
+    y = page_height - 20 * mm
+    y = _draw_simple_table(pdf, "Переможці зон", zone_df, y, page_width, page_height)
+    _draw_simple_table(pdf, "Окрема номінація: найбільша риба періоду в зоні", period_zone_df, y, page_width, page_height)
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
 # ---------- UI ----------
 st.set_page_config(page_title="Карпові змагання", page_icon="🎣", layout="wide")
 init_db()
+
+query_params = st.query_params
+scoreboard_mode = str(query_params.get("mode", "")).lower() in ["tablo", "scoreboard", "tv"]
+if scoreboard_mode:
+    st.markdown(
+        """
+        <style>
+        section[data-testid="stSidebar"] {display:none !important;}
+        .block-container {padding-top:0.6rem; max-width: 980px;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 st.markdown(
     """
@@ -624,34 +734,39 @@ st.markdown(
 st.title("🎣 MVP: облік результатів карпових змагань")
 st.caption("Supabase Postgres версія. Додай DATABASE_URL у secrets для роботи в Streamlit Cloud.")
 
-with st.sidebar:
-    st.header("Турніри")
-    if st.button("Заповнити демо-дані"):
-        seed_demo_data()
-        st.success("Демо-дані додано")
-        st.rerun()
-
+if scoreboard_mode:
     tournaments_df = get_tournaments_df()
-    if not tournaments_df.empty:
-        tournament_labels = {
-            f"{row['name']} ({TOURNAMENT_TYPES.get(row['tournament_type'], row['tournament_type'])})": int(row["id"])
-            for _, row in tournaments_df.iterrows()
-        }
-        active_tournament_id = get_active_tournament_id()
-        default_index = list(tournament_labels.values()).index(active_tournament_id) if active_tournament_id in tournament_labels.values() else 0
-        selected_label = st.selectbox("Активний турнір", list(tournament_labels.keys()), index=default_index)
-        selected_tournament_id = tournament_labels[selected_label]
-        if selected_tournament_id != active_tournament_id:
-            set_active_tournament(selected_tournament_id)
+    page = "Мобільне табло"
+    selected_tournament_id = get_active_tournament_id()
+else:
+    with st.sidebar:
+        st.header("Турніри")
+        if st.button("Заповнити демо-дані"):
+            seed_demo_data()
+            st.success("Демо-дані додано")
             st.rerun()
-    else:
-        selected_tournament_id = None
 
-    st.markdown("---")
-    page = st.radio(
-        "Розділ",
-        ["Турніри", "Команди", "Швидке зважування", "Додати рибу", "Результати", "Мобільне табло", "Підсумки", "Журнал зважувань"],
-    )
+        tournaments_df = get_tournaments_df()
+        if not tournaments_df.empty:
+            tournament_labels = {
+                f"{row['name']} ({TOURNAMENT_TYPES.get(row['tournament_type'], row['tournament_type'])})": int(row["id"])
+                for _, row in tournaments_df.iterrows()
+            }
+            active_tournament_id = get_active_tournament_id()
+            default_index = list(tournament_labels.values()).index(active_tournament_id) if active_tournament_id in tournament_labels.values() else 0
+            selected_label = st.selectbox("Активний турнір", list(tournament_labels.keys()), index=default_index)
+            selected_tournament_id = tournament_labels[selected_label]
+            if selected_tournament_id != active_tournament_id:
+                set_active_tournament(selected_tournament_id)
+                st.rerun()
+        else:
+            selected_tournament_id = None
+
+        st.markdown("---")
+        page = st.radio(
+            "Розділ",
+            ["Турніри", "Команди", "Швидке зважування", "Додати рибу", "Результати", "Мобільне табло", "Підсумки", "Журнал зважувань"],
+        )
 
 active_tournament_id = get_active_tournament_id()
 active_meta = get_tournament_meta(active_tournament_id) if active_tournament_id else None
@@ -828,6 +943,19 @@ elif page == "Результати":
     st.subheader(f"Таблиці результатів — {active_meta['name']}")
     topN_df, total_df, combo_df = build_results(active_tournament_id)
     top_n_value = int(active_meta.get("top_n", 5))
+    pdf_bytes = build_results_pdf(active_tournament_id)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.download_button(
+            "⬇️ Експорт у PDF",
+            data=pdf_bytes,
+            file_name=f"results_{active_meta['name'].replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with c2:
+        st.code("Додай до URL: ?mode=tablo", language=None)
 
     result_tabs = st.tabs([f"{top_n_value} крупних", "Загальна вага", "Залік"] if active_meta["tournament_type"] == "combo" else [f"{top_n_value} крупних"])
 
@@ -845,6 +973,12 @@ elif page == "Результати":
 
 elif page == "Мобільне табло":
     st.subheader(f"Мобільне табло — {active_meta['name']}")
+    if scoreboard_mode:
+        st.caption("Режим табло активний. Для звичайного інтерфейсу відкрий додаток без ?mode=tablo")
+        st.button("Оновити табло", use_container_width=True)
+    else:
+        current_url = st.query_params.to_dict() if hasattr(st.query_params, 'to_dict') else {}
+        st.caption("Окремий режим табло: відкрий додаток з параметром ?mode=tablo")
     board_df, top_n_value = build_live_scoreboard(active_tournament_id)
     big_fish_df = build_big_fish(active_tournament_id)
     period_zone_df = build_period_zone_winners(active_tournament_id)
