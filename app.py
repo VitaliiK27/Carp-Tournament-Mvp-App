@@ -9,7 +9,9 @@ import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 FISH_TYPES = ["Короп", "Амур", "Інше"]
@@ -20,6 +22,10 @@ TOURNAMENT_TYPES = {
 MAX_TOP_N = 15
 PERIOD_OPTIONS = [6, 12, 18, 24]
 ZONE_OPTIONS = ["A", "B", "C", "D"]
+PDF_FONT_NAME = "DejaVuSans"
+PDF_FONT_BOLD_NAME = "DejaVuSans-Bold"
+PDF_FONT_REGULAR_PATH = "fonts/DejaVuSans.ttf"
+PDF_FONT_BOLD_PATH = "fonts/DejaVuSans-Bold.ttf"
 
 
 # ---------- DB ----------
@@ -573,22 +579,34 @@ def seed_demo_data():
         add_catch(tournament_id, team_map[team_name], caught_at, int(period), fish_type, float(weight))
 
 
+def register_pdf_fonts():
+    registered = pdfmetrics.getRegisteredFontNames()
+    if PDF_FONT_NAME not in registered:
+        pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, PDF_FONT_REGULAR_PATH))
+    if PDF_FONT_BOLD_NAME not in registered:
+        pdfmetrics.registerFont(TTFont(PDF_FONT_BOLD_NAME, PDF_FONT_BOLD_PATH))
+
+
 def _fit_text(text: str, font_name: str, font_size: int, max_width: float) -> str:
-    text = str(text)
-    while text and stringWidth(text, font_name, font_size) > max_width:
-        text = text[:-1]
-    return text if text == str(text) else text + "..."
+    original = str(text)
+    fitted = original
+    while fitted and stringWidth(fitted, font_name, font_size) > max_width:
+        fitted = fitted[:-1]
+    if fitted != original:
+        fitted = fitted.rstrip()
+        return (fitted[:-3] + "...") if len(fitted) > 3 else "..."
+    return fitted
 
 
 def _draw_simple_table(pdf: canvas.Canvas, title: str, df: pd.DataFrame, y: float, page_width: float, page_height: float):
     left = 15 * mm
     usable = page_width - 30 * mm
-    pdf.setFont("Helvetica-Bold", 11)
+    pdf.setFont(PDF_FONT_BOLD_NAME, 11)
     pdf.drawString(left, y, title)
     y -= 7 * mm
 
     if df.empty:
-        pdf.setFont("Helvetica", 9)
+        pdf.setFont(PDF_FONT_NAME, 9)
         pdf.drawString(left, y, "Немає даних")
         return y - 10 * mm
 
@@ -601,20 +619,20 @@ def _draw_simple_table(pdf: canvas.Canvas, title: str, df: pd.DataFrame, y: floa
     pdf.setFillColor(colors.HexColor("#EAEAEA"))
     pdf.rect(left, y - row_h, usable, row_h, fill=1, stroke=0)
     pdf.setFillColor(colors.black)
-    pdf.setFont("Helvetica-Bold", 8)
+    pdf.setFont(PDF_FONT_BOLD_NAME, 8)
     for idx, col in enumerate(shown):
-        pdf.drawString(left + idx * col_w + 2, y - 5 * mm, _fit_text(col, "Helvetica-Bold", 8, col_w - 4))
+        pdf.drawString(left + idx * col_w + 2, y - 5 * mm, _fit_text(col, PDF_FONT_BOLD_NAME, 8, col_w - 4))
     y -= row_h
 
-    pdf.setFont("Helvetica", 8)
+    pdf.setFont(PDF_FONT_NAME, 8)
     for _, row in table_df.iterrows():
         if y < 20 * mm:
             pdf.showPage()
-            pdf.setFont("Helvetica", 8)
+            pdf.setFont(PDF_FONT_NAME, 8)
             y = page_height - 20 * mm
         for idx, col in enumerate(shown):
             value = row[col]
-            text = _fit_text(value, "Helvetica", 8, col_w - 4)
+            text = _fit_text(value, PDF_FONT_NAME, 8, col_w - 4)
             pdf.drawString(left + idx * col_w + 2, y - 5 * mm, str(text))
         pdf.setStrokeColor(colors.HexColor("#DDDDDD"))
         pdf.line(left, y - row_h, left + usable, y - row_h)
@@ -624,6 +642,7 @@ def _draw_simple_table(pdf: canvas.Canvas, title: str, df: pd.DataFrame, y: floa
 
 
 def build_results_pdf(tournament_id: int) -> bytes:
+    register_pdf_fonts()
     meta = get_tournament_meta(tournament_id)
     topN_df, total_df, combo_df = build_results(tournament_id)
     top_n_value = int(meta.get("top_n", 5))
@@ -639,9 +658,9 @@ def build_results_pdf(tournament_id: int) -> bytes:
     page_width, page_height = A4
 
     pdf.setTitle(f"Результати - {meta['name']}")
-    pdf.setFont("Helvetica-Bold", 16)
+    pdf.setFont(PDF_FONT_BOLD_NAME, 16)
     pdf.drawString(15 * mm, page_height - 20 * mm, meta["name"])
-    pdf.setFont("Helvetica", 10)
+    pdf.setFont(PDF_FONT_NAME, 10)
     pdf.drawString(15 * mm, page_height - 28 * mm, f"Тип: {TOURNAMENT_TYPES.get(meta['tournament_type'], meta['tournament_type'])}")
     pdf.drawString(15 * mm, page_height - 34 * mm, f"Період турніру: {meta['start_at']} - {meta['end_at']}")
     pdf.drawString(15 * mm, page_height - 40 * mm, f"Крупних риб: {top_n_value} | Період: {meta['period_hours']} год | Мін. вага: {meta['min_weight']} кг")
@@ -731,8 +750,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🎣 Коропові змагання")
-st.caption("Створи турнір, додай команди і в бій! НХНЛ!")
+st.title("🎣 MVP: облік результатів карпових змагань")
+st.caption("Supabase Postgres версія. Додай DATABASE_URL у secrets для роботи в Streamlit Cloud.")
 
 if scoreboard_mode:
     tournaments_df = get_tournaments_df()
