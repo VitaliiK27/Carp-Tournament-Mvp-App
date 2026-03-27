@@ -731,8 +731,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🎣 MVP: облік результатів карпових змагань")
-st.caption("Supabase Postgres версія. Додай DATABASE_URL у secrets для роботи в Streamlit Cloud.")
+st.title("🎣 Коропові змагання")
+st.caption("Створи турнір, додай команди і в бій! НХНЛ!")
 
 if scoreboard_mode:
     tournaments_df = get_tournaments_df()
