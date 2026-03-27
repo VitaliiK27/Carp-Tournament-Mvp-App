@@ -684,7 +684,7 @@ def build_results_pdf(tournament_id: int) -> bytes:
 
 
 # ---------- UI ----------
-st.set_page_config(page_title="Карпові змагання", page_icon="🎣", layout="wide")
+st.set_page_config(page_title="Коропові змагання", page_icon="🎣", layout="wide")
 init_db()
 
 query_params = st.query_params
@@ -750,8 +750,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🎣 MVP: облік результатів карпових змагань")
-st.caption("Supabase Postgres версія. Додай DATABASE_URL у secrets для роботи в Streamlit Cloud.")
+st.title("🎣 Коропові змагання")
+st.caption("Створи турнір, додай команди і в бій! НХНЛ!")
 
 if scoreboard_mode:
     tournaments_df = get_tournaments_df()
