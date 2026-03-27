@@ -1,6 +1,5 @@
+venv/
 __pycache__/
+.streamlit/secrets.toml
 *.pyc
-carp_tournament.db
-.venv/
-.env
 .DS_Store
