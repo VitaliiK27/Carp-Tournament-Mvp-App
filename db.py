@@ -208,6 +208,35 @@ def update_tournament(
         conn.commit()
 
 
+def delete_tournament(tournament_id: int):
+    conn = get_conn()
+    with conn.cursor() as cur:
+        cur.execute("SELECT is_active FROM tournaments WHERE id = %s", (int(tournament_id),))
+        row = cur.fetchone()
+        if row is None:
+            conn.commit()
+            return
+
+        was_active = bool(row[0])
+        cur.execute("DELETE FROM tournaments WHERE id = %s", (int(tournament_id),))
+
+        if was_active:
+            cur.execute(
+                """
+                SELECT id
+                FROM tournaments
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+            next_row = cur.fetchone()
+            cur.execute("UPDATE tournaments SET is_active = FALSE")
+            if next_row is not None:
+                cur.execute("UPDATE tournaments SET is_active = TRUE WHERE id = %s", (int(next_row[0]),))
+
+        conn.commit()
+
+
 def prune_old_tournaments():
     ids_df = query_df("SELECT id FROM tournaments ORDER BY created_at DESC")
     ids = ids_df["id"].tolist() if not ids_df.empty else []

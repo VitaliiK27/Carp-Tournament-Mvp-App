@@ -2,6 +2,8 @@
 
 from db import ZONE_OPTIONS, add_team, get_teams_df, update_team
 
+ADD_TEAM_SUCCESS_KEY = "add_team_success"
+
 EDIT_TEAM_STATE_KEYS = {
     "selected_id": "edit_team_selected_id",
     "name": "edit_team_name",
@@ -42,10 +44,16 @@ def render_teams_page(active_meta: dict, active_tournament_id: int):
                 else:
                     try:
                         add_team(active_tournament_id, name, sector, zone)
-                        st.success(f"Команду '{name}' додано")
+                        st.session_state[ADD_TEAM_SUCCESS_KEY] = f"Команду '{name}' додано"
                         st.rerun()
                     except Exception as exc:
                         st.error(f"Не вдалося додати команду: {exc}")
+        add_success_message = st.session_state.pop(ADD_TEAM_SUCCESS_KEY, None)
+        if add_success_message:
+            st.markdown(
+                f'<div class="form-success-banner">✅ {add_success_message}</div>',
+                unsafe_allow_html=True,
+            )
 
     teams_df = get_teams_df(active_tournament_id)
 
@@ -54,26 +62,27 @@ def render_teams_page(active_meta: dict, active_tournament_id: int):
             f"{row['name']} (сектор {row['sector']}, зона {row['zone']})": int(row["id"])
             for _, row in teams_df.iterrows()
         }
-        selected_label = st.selectbox("Команда для редагування", list(team_options.keys()))
-        selected_team_id = team_options[selected_label]
-        sync_edit_team_form(teams_df, selected_team_id)
+        with st.expander("✏️ Редагувати команду", expanded=False):
+            selected_label = st.selectbox("Команда для редагування", list(team_options.keys()))
+            selected_team_id = team_options[selected_label]
+            sync_edit_team_form(teams_df, selected_team_id)
 
-        with st.form("edit_team_form"):
-            edit_name = st.text_input("Назва команди", key=EDIT_TEAM_STATE_KEYS["name"])
-            edit_sector = st.text_input("Сектор", key=EDIT_TEAM_STATE_KEYS["sector"])
-            edit_zone = st.selectbox("Зона", ZONE_OPTIONS, key=EDIT_TEAM_STATE_KEYS["zone"])
-            edit_submitted = st.form_submit_button("Зберегти зміни")
-            if edit_submitted:
-                if not edit_name.strip() or not edit_sector.strip():
-                    st.error("Вкажи назву команди та сектор")
-                else:
-                    try:
-                        update_team(selected_team_id, edit_name, edit_sector, edit_zone)
-                        st.success("Дані команди оновлено")
-                        st.session_state["edit_team_loaded_id"] = None
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Не вдалося оновити команду: {exc}")
+            with st.form("edit_team_form"):
+                edit_name = st.text_input("Назва команди", key=EDIT_TEAM_STATE_KEYS["name"])
+                edit_sector = st.text_input("Сектор", key=EDIT_TEAM_STATE_KEYS["sector"])
+                edit_zone = st.selectbox("Зона", ZONE_OPTIONS, key=EDIT_TEAM_STATE_KEYS["zone"])
+                edit_submitted = st.form_submit_button("Зберегти зміни")
+                if edit_submitted:
+                    if not edit_name.strip() or not edit_sector.strip():
+                        st.error("Вкажи назву команди та сектор")
+                    else:
+                        try:
+                            update_team(selected_team_id, edit_name, edit_sector, edit_zone)
+                            st.success("Дані команди оновлено")
+                            st.session_state["edit_team_loaded_id"] = None
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Не вдалося оновити команду: {exc}")
 
     st.markdown("### Список команд")
     st.dataframe(teams_df.drop(columns=["id"]) if not teams_df.empty else teams_df, use_container_width=True, height=360)

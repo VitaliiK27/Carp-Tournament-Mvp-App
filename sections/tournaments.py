@@ -1,8 +1,19 @@
-from datetime import datetime
+﻿from datetime import datetime
 
 import streamlit as st
+import streamlit.components.v1 as components
 
-from db import MAX_TOP_N, PERIOD_OPTIONS, TOURNAMENT_TYPES, create_tournament, format_db_datetime, get_tournaments_df, parse_datetime, update_tournament
+from db import (
+    MAX_TOP_N,
+    PERIOD_OPTIONS,
+    TOURNAMENT_TYPES,
+    create_tournament,
+    delete_tournament,
+    format_db_datetime,
+    get_tournaments_df,
+    parse_datetime,
+    update_tournament,
+)
 
 EDIT_TOURNAMENT_STATE_KEYS = {
     "name": "edit_tournament_name",
@@ -63,9 +74,6 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
     st.subheader("Керування турнірами")
     sync_edit_tournament_form(active_meta)
     sync_create_tournament_form()
-    creation_success_message = st.session_state.pop("tournament_created_success", None)
-    if creation_success_message:
-        st.success(creation_success_message, icon="✅")
 
     name = st.text_input("Назва змагання", key=CREATE_TOURNAMENT_STATE_KEYS["name"])
     tournament_type = st.selectbox(
@@ -126,64 +134,115 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
                 st.session_state["tournament_created_success"] = "Турнір успішно створено. Нове змагання стало активним."
                 st.rerun()
 
+    creation_success_message = st.session_state.pop("tournament_created_success", None)
+    if creation_success_message:
+        st.markdown(
+            f'<div class="form-success-banner">✅ {creation_success_message}</div>',
+            unsafe_allow_html=True,
+        )
+        components.html(
+            """
+            <script>
+            const scrollToSuccessBanner = () => {
+                const banner = window.parent.document.querySelector('.form-success-banner');
+                if (banner) {
+                    banner.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            };
+            window.parent.requestAnimationFrame(() => {
+                window.parent.setTimeout(scrollToSuccessBanner, 120);
+            });
+            </script>
+            """,
+            height=0,
+        )
+
+    deletion_success_message = st.session_state.pop("tournament_deleted_success", None)
+    if deletion_success_message:
+        st.markdown(
+            f'<div class="form-success-banner">✅ {deletion_success_message}</div>',
+            unsafe_allow_html=True,
+        )
+
     if active_meta is not None and active_tournament_id is not None:
-        st.markdown("### Редагування обраного турніру")
-        with st.form("edit_tournament_form"):
-            edit_name = st.text_input("Назва змагання", key=EDIT_TOURNAMENT_STATE_KEYS["name"])
-            edit_tournament_type = st.selectbox(
-                "Тип змагання",
-                options=list(TOURNAMENT_TYPES.keys()),
-                format_func=lambda x: TOURNAMENT_TYPES[x],
-                key=EDIT_TOURNAMENT_STATE_KEYS["type"],
-            )
-            edit_top_n = st.number_input(
-                "Скільки крупних риб враховувати",
-                min_value=1,
-                max_value=MAX_TOP_N,
-                step=1,
-                key=EDIT_TOURNAMENT_STATE_KEYS["top_n"],
-            )
-            edit_col_a, edit_col_b = st.columns(2)
-            with edit_col_a:
-                edit_start_date = st.date_input("Дата старту", key=EDIT_TOURNAMENT_STATE_KEYS["start_date"])
-                edit_start_time = st.time_input("Час старту", key=EDIT_TOURNAMENT_STATE_KEYS["start_time"], step=3600)
-                edit_period_hours = st.selectbox(
-                    "Тривалість одного періоду (год)",
-                    PERIOD_OPTIONS,
-                    key=EDIT_TOURNAMENT_STATE_KEYS["period_hours"],
+        with st.expander("✏️ Редагувати турнір", expanded=False):
+            with st.form("edit_tournament_form"):
+                edit_name = st.text_input("Назва змагання", key=EDIT_TOURNAMENT_STATE_KEYS["name"])
+                edit_tournament_type = st.selectbox(
+                    "Тип змагання",
+                    options=list(TOURNAMENT_TYPES.keys()),
+                    format_func=lambda x: TOURNAMENT_TYPES[x],
+                    key=EDIT_TOURNAMENT_STATE_KEYS["type"],
                 )
-            with edit_col_b:
-                edit_end_date = st.date_input("Дата завершення", key=EDIT_TOURNAMENT_STATE_KEYS["end_date"])
-                edit_end_time = st.time_input("Час завершення", key=EDIT_TOURNAMENT_STATE_KEYS["end_time"], step=3600)
-                edit_min_weight = st.number_input(
-                    "Мінімальна вага риби (кг)",
-                    min_value=0.0,
-                    step=0.1,
-                    format="%.3f",
-                    key=EDIT_TOURNAMENT_STATE_KEYS["min_weight"],
+                edit_top_n = st.number_input(
+                    "Скільки крупних риб враховувати",
+                    min_value=1,
+                    max_value=MAX_TOP_N,
+                    step=1,
+                    key=EDIT_TOURNAMENT_STATE_KEYS["top_n"],
                 )
-            edit_submitted = st.form_submit_button("Зберегти зміни")
-            if edit_submitted:
-                if not edit_name.strip():
-                    st.error("Вкажи назву змагання")
-                else:
-                    edit_start_at = format_db_datetime(datetime.combine(edit_start_date, edit_start_time))
-                    edit_end_at = format_db_datetime(datetime.combine(edit_end_date, edit_end_time))
-                    if edit_end_at <= edit_start_at:
-                        st.error("Дата і час завершення мають бути пізніше за старт")
+                edit_col_a, edit_col_b = st.columns(2)
+                with edit_col_a:
+                    edit_start_date = st.date_input("Дата старту", key=EDIT_TOURNAMENT_STATE_KEYS["start_date"])
+                    edit_start_time = st.time_input("Час старту", key=EDIT_TOURNAMENT_STATE_KEYS["start_time"], step=3600)
+                    edit_period_hours = st.selectbox(
+                        "Тривалість одного періоду (год)",
+                        PERIOD_OPTIONS,
+                        key=EDIT_TOURNAMENT_STATE_KEYS["period_hours"],
+                    )
+                with edit_col_b:
+                    edit_end_date = st.date_input("Дата завершення", key=EDIT_TOURNAMENT_STATE_KEYS["end_date"])
+                    edit_end_time = st.time_input("Час завершення", key=EDIT_TOURNAMENT_STATE_KEYS["end_time"], step=3600)
+                    edit_min_weight = st.number_input(
+                        "Мінімальна вага риби (кг)",
+                        min_value=0.0,
+                        step=0.1,
+                        format="%.3f",
+                        key=EDIT_TOURNAMENT_STATE_KEYS["min_weight"],
+                    )
+                edit_submitted = st.form_submit_button("Зберегти зміни")
+                if edit_submitted:
+                    if not edit_name.strip():
+                        st.error("Вкажи назву змагання")
                     else:
-                        update_tournament(
-                            active_tournament_id,
-                            edit_name,
-                            edit_tournament_type,
-                            int(edit_top_n),
-                            edit_start_at,
-                            edit_end_at,
-                            int(edit_period_hours),
-                            float(edit_min_weight),
-                        )
-                        st.success("Дані турніру оновлено")
-                        st.rerun()
+                        edit_start_at = format_db_datetime(datetime.combine(edit_start_date, edit_start_time))
+                        edit_end_at = format_db_datetime(datetime.combine(edit_end_date, edit_end_time))
+                        if edit_end_at <= edit_start_at:
+                            st.error("Дата і час завершення мають бути пізніше за старт")
+                        else:
+                            update_tournament(
+                                active_tournament_id,
+                                edit_name,
+                                edit_tournament_type,
+                                int(edit_top_n),
+                                edit_start_at,
+                                edit_end_at,
+                                int(edit_period_hours),
+                                float(edit_min_weight),
+                            )
+                            st.success("Дані турніру оновлено")
+                            st.rerun()
+
+            st.divider()
+            st.caption("Видалення турніру видалить також усі команди та зважування в ньому.")
+            confirm_delete = st.checkbox(
+                "Підтверджую видалення турніру",
+                key=f"confirm_delete_tournament_{active_tournament_id}",
+            )
+            delete_submitted = st.button(
+                "Видалити турнір",
+                key=f"delete_tournament_{active_tournament_id}",
+                use_container_width=True,
+            )
+            if delete_submitted:
+                if not confirm_delete:
+                    st.error("Підтверди видалення турніру")
+                else:
+                    deleted_name = active_meta["name"]
+                    delete_tournament(active_tournament_id)
+                    st.session_state["edit_tournament_loaded_id"] = None
+                    st.session_state["tournament_deleted_success"] = f"Турнір '{deleted_name}' видалено."
+                    st.rerun()
 
     st.markdown("### Останні 3 змагання")
     tournaments_df = get_tournaments_df().copy()

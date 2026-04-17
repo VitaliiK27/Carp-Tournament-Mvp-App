@@ -1,6 +1,13 @@
 import streamlit as st
 
-from db import TOURNAMENT_TYPES, get_active_tournament_id, get_tournament_meta, get_tournaments_df, init_db, seed_demo_data, set_active_tournament
+from db import (
+    TOURNAMENT_TYPES,
+    get_active_tournament_id,
+    get_tournament_meta,
+    get_tournaments_df,
+    init_db,
+    set_active_tournament,
+)
 from sections.quick_weighing import render_quick_weighing_page
 from sections.results import render_results_page
 from sections.scoreboard import render_scoreboard_page
@@ -19,20 +26,15 @@ PAGE_OPTIONS = [
 
 
 def render_global_styles(scoreboard_mode: bool):
-    if scoreboard_mode:
-        st.markdown(
-            """
-            <style>
-            section[data-testid="stSidebar"] {display:none !important;}
-            .block-container {padding-top:0.6rem; max-width: 980px;}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
     st.markdown(
         """
         <style>
+        section[data-testid="stSidebar"] {
+            display: none !important;
+        }
+        button[kind="header"], [data-testid="collapsedControl"] {
+            display: none !important;
+        }
         .block-container {
             padding-top: 1rem;
             padding-bottom: 4rem;
@@ -47,8 +49,33 @@ def render_global_styles(scoreboard_mode: bool):
             margin-bottom: 0.75rem;
             background: rgba(255,255,255,0.02);
         }
+        .form-success-banner {
+            margin-top: 0.75rem;
+            padding: 0.95rem 1rem;
+            border-radius: 14px;
+            border: 1px solid rgba(50, 122, 74, 0.28);
+            background: linear-gradient(180deg, rgba(235, 248, 238, 0.98), rgba(221, 242, 228, 0.98));
+            color: #1f5130;
+            box-shadow: 0 8px 18px rgba(50, 122, 74, 0.12);
+            font-weight: 600;
+        }
+        div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: linear-gradient(180deg, rgba(247,248,244,0.96), rgba(237,239,232,0.96));
+            border: 1px solid rgba(62, 74, 52, 0.16);
+            border-radius: 18px;
+            box-shadow: 0 10px 28px rgba(46, 56, 36, 0.08);
+        }
+        div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stSegmentedControl"] button {
+            border-radius: 10px;
+        }
         div[data-testid="stDataFrame"] {
             overflow-x: auto;
+        }
+        div[data-testid="stSegmentedControl"] {
+            margin-top: 0.35rem;
+        }
+        div[data-testid="stSegmentedControl"] button {
+            min-height: 2.8rem;
         }
         @media (max-width: 768px) {
             .block-container {
@@ -69,6 +96,12 @@ def render_global_styles(scoreboard_mode: bool):
                 border-radius: 10px;
                 min-height: 2.8rem;
             }
+            .form-success-banner {
+                margin-top: 0.85rem;
+                padding: 1rem 0.9rem;
+                font-size: 0.98rem;
+                line-height: 1.45;
+            }
             div[data-testid="stNumberInput"] input,
             div[data-testid="stTextInput"] input,
             div[data-testid="stTextArea"] textarea {
@@ -80,14 +113,27 @@ def render_global_styles(scoreboard_mode: bool):
         unsafe_allow_html=True,
     )
 
+    if scoreboard_mode:
+        st.markdown(
+            """
+            <style>
+            .block-container {
+                padding-top: 0.6rem;
+                max-width: 980px;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-def get_current_page(scoreboard_mode: bool):
+
+def render_navigation(scoreboard_mode: bool):
     if scoreboard_mode:
         return "Мобільне табло"
 
-    with st.sidebar:
-        st.header("Турніри")
-
+    nav_container = st.container(border=True)
+    with nav_container:
+        st.caption("Навігація")
         tournaments_df = get_tournaments_df()
         if not tournaments_df.empty:
             tournament_labels = {
@@ -95,15 +141,35 @@ def get_current_page(scoreboard_mode: bool):
                 for _, row in tournaments_df.iterrows()
             }
             active_tournament_id = get_active_tournament_id()
-            default_index = list(tournament_labels.values()).index(active_tournament_id) if active_tournament_id in tournament_labels.values() else 0
-            selected_label = st.selectbox("Активний турнір", list(tournament_labels.keys()), index=default_index)
+            labels = list(tournament_labels.keys())
+            values = list(tournament_labels.values())
+            default_index = values.index(active_tournament_id) if active_tournament_id in values else 0
+            selected_label = st.selectbox(
+                "Активний турнір",
+                labels,
+                index=default_index,
+                key="top_nav_tournament",
+            )
             selected_tournament_id = tournament_labels[selected_label]
             if selected_tournament_id != active_tournament_id:
                 set_active_tournament(selected_tournament_id)
                 st.rerun()
+        else:
+            st.caption("Спочатку створи турнір, тоді з'явиться вибір активного турніру.")
 
-        st.markdown("---")
-        return st.radio("Розділ", PAGE_OPTIONS)
+        current_page = st.session_state.get("main_page", PAGE_OPTIONS[0])
+        if current_page not in PAGE_OPTIONS:
+            current_page = PAGE_OPTIONS[0]
+
+        page = st.segmented_control(
+            "Розділ",
+            PAGE_OPTIONS,
+            default=current_page,
+            key="main_page",
+            width="stretch",
+            label_visibility="collapsed",
+        )
+    return page or PAGE_OPTIONS[0]
 
 
 def render_page(page: str, active_tournament_id: int | None, active_meta: dict | None, scoreboard_mode: bool):
@@ -127,7 +193,12 @@ def render_page(page: str, active_tournament_id: int | None, active_meta: dict |
         render_summary_page(active_meta, active_tournament_id)
 
 
-st.set_page_config(page_title="Коропові змагання", page_icon="🎣", layout="wide")
+st.set_page_config(
+    page_title="Коропові змагання",
+    page_icon="🎣",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 init_db()
 
 query_params = st.query_params
@@ -138,7 +209,7 @@ render_global_styles(scoreboard_mode)
 st.title("🎣 Коропові змагання")
 st.caption("Створи турнір, додай команди і в бій! НХНЛ!")
 
-page = get_current_page(scoreboard_mode)
+page = render_navigation(scoreboard_mode)
 active_tournament_id = get_active_tournament_id()
 active_meta = get_tournament_meta(active_tournament_id) if active_tournament_id else None
 
