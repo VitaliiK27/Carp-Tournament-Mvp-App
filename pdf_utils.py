@@ -9,7 +9,17 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
-from db import TOURNAMENT_TYPES, build_big_fish, build_period_zone_winners, build_podium, build_results, build_zone_winners, get_tournament_meta
+from db import (
+    TOURNAMENT_TYPES,
+    build_big_fish,
+    build_period_zone_winners,
+    build_podium,
+    build_results,
+    build_zone_winners,
+    get_tournament_meta,
+    get_zone_score_col,
+    get_zone_source_df,
+)
 
 PDF_FONT_NAME = "DejaVuSans"
 PDF_FONT_BOLD_NAME = "DejaVuSans-Bold"
@@ -138,12 +148,13 @@ def build_results_pdf(tournament_id: int) -> bytes:
     meta = get_tournament_meta(tournament_id)
     top_n_df, total_df, combo_df = build_results(tournament_id)
     top_n_value = int(meta.get("top_n", 5))
+    tournament_type = meta["tournament_type"]
     big_fish_df = build_big_fish(tournament_id)
     period_zone_df = build_period_zone_winners(tournament_id)
-    zone_source = total_df if meta["tournament_type"] == "combo" else top_n_df
-    zone_col = "Загальна вага" if meta["tournament_type"] == "combo" else f"Заг. вага по {top_n_value}"
+    zone_source = get_zone_source_df(tournament_type, top_n_df, total_df)
+    zone_col = get_zone_score_col(tournament_type, top_n_value)
     zone_df = build_zone_winners(zone_source, zone_col)
-    podium_df = build_podium(top_n_df, total_df, combo_df, meta["tournament_type"], top_n_value)
+    podium_df = build_podium(top_n_df, total_df, combo_df, tournament_type, top_n_value)
 
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=A4)
@@ -161,17 +172,19 @@ def build_results_pdf(tournament_id: int) -> bytes:
     y = _draw_simple_table(pdf, "Подіум", podium_df, y, page_width, page_height)
     y = _draw_simple_table(pdf, "Big Fish", big_fish_df, y, page_width, page_height)
 
-    landscape_width, landscape_height = landscape(A4)
-    pdf.showPage()
-    pdf.setPageSize((landscape_width, landscape_height))
-    _draw_landscape_results_table(pdf, f"Таблиця: {top_n_value} крупних риб", top_n_df, landscape_width, landscape_height)
+    if tournament_type in {"topN", "combo"}:
+        landscape_width, landscape_height = landscape(A4)
+        pdf.showPage()
+        pdf.setPageSize((landscape_width, landscape_height))
+        _draw_landscape_results_table(pdf, f"Таблиця: {top_n_value} крупних риб", top_n_df, landscape_width, landscape_height)
 
     pdf.showPage()
     pdf.setPageSize(A4)
     page_width, page_height = A4
     y = page_height - 20 * mm
-    if meta["tournament_type"] == "combo":
+    if tournament_type in {"combo", "total"}:
         y = _draw_simple_table(pdf, "Таблиця: загальна вага", total_df, y, page_width, page_height)
+    if tournament_type == "combo":
         y = _draw_simple_table(pdf, "Залік по сумі місць", combo_df, y, page_width, page_height)
     y = _draw_simple_table(pdf, "Переможці зон", zone_df, y, page_width, page_height)
     _draw_simple_table(pdf, "Окрема номінація: найбільша риба періоду в зоні", period_zone_df, y, page_width, page_height)

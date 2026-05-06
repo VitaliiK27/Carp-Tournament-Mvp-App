@@ -1,4 +1,4 @@
-﻿from datetime import datetime
+from datetime import datetime
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -70,6 +70,17 @@ def sync_create_tournament_form():
             st.session_state[end_date_key] = st.session_state[start_date_key]
 
 
+def render_top_n_input(key: str):
+    return st.number_input(
+        "Скільки крупних риб враховувати",
+        min_value=1,
+        max_value=MAX_TOP_N,
+        value=5,
+        step=1,
+        key=key,
+    )
+
+
 def render_tournaments_page(active_meta: dict | None, active_tournament_id: int | None):
     st.subheader("Керування турнірами")
     sync_edit_tournament_form(active_meta)
@@ -82,14 +93,12 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
         format_func=lambda x: TOURNAMENT_TYPES[x],
         key=CREATE_TOURNAMENT_STATE_KEYS["type"],
     )
-    top_n = st.number_input(
-        "Скільки крупних риб враховувати",
-        min_value=1,
-        max_value=MAX_TOP_N,
-        value=5,
-        step=1,
-        key=CREATE_TOURNAMENT_STATE_KEYS["top_n"],
-    )
+    if tournament_type != "total":
+        top_n = int(render_top_n_input(CREATE_TOURNAMENT_STATE_KEYS["top_n"]))
+    else:
+        top_n = int(st.session_state.get(CREATE_TOURNAMENT_STATE_KEYS["top_n"], 5) or 5)
+        st.caption("Для типу 'Загальна вага' поле крупних риб не використовується.")
+
     col_a, col_b = st.columns(2)
     with col_a:
         start_date = st.date_input("Дата старту", key=CREATE_TOURNAMENT_STATE_KEYS["start_date"])
@@ -130,7 +139,7 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
             if end_at <= start_at:
                 st.error("Дата і час завершення мають бути пізніше за старт")
             else:
-                create_tournament(name, tournament_type, int(top_n), start_at, end_at, int(period_hours), float(min_weight))
+                create_tournament(name, tournament_type, top_n, start_at, end_at, int(period_hours), float(min_weight))
                 st.session_state["tournament_created_success"] = "Турнір успішно створено. Нове змагання стало активним."
                 st.rerun()
 
@@ -174,13 +183,12 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
                     format_func=lambda x: TOURNAMENT_TYPES[x],
                     key=EDIT_TOURNAMENT_STATE_KEYS["type"],
                 )
-                edit_top_n = st.number_input(
-                    "Скільки крупних риб враховувати",
-                    min_value=1,
-                    max_value=MAX_TOP_N,
-                    step=1,
-                    key=EDIT_TOURNAMENT_STATE_KEYS["top_n"],
-                )
+                if edit_tournament_type != "total":
+                    edit_top_n = int(render_top_n_input(EDIT_TOURNAMENT_STATE_KEYS["top_n"]))
+                else:
+                    edit_top_n = int(st.session_state.get(EDIT_TOURNAMENT_STATE_KEYS["top_n"], 5) or 5)
+                    st.caption("Для типу 'Загальна вага' поле крупних риб не використовується.")
+
                 edit_col_a, edit_col_b = st.columns(2)
                 with edit_col_a:
                     edit_start_date = st.date_input("Дата старту", key=EDIT_TOURNAMENT_STATE_KEYS["start_date"])
@@ -214,7 +222,7 @@ def render_tournaments_page(active_meta: dict | None, active_tournament_id: int 
                                 active_tournament_id,
                                 edit_name,
                                 edit_tournament_type,
-                                int(edit_top_n),
+                                edit_top_n,
                                 edit_start_at,
                                 edit_end_at,
                                 int(edit_period_hours),

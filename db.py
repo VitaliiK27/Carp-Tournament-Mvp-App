@@ -9,6 +9,7 @@ FISH_TYPES = ["Короп", "Амур"]
 TOURNAMENT_TYPES = {
     "topN": "N крупних риб",
     "combo": "N крупних + загальна вага",
+    "total": "Загальна вага",
 }
 MAX_TOP_N = 15
 PERIOD_OPTIONS = [6, 12, 18, 24]
@@ -461,6 +462,18 @@ def add_places(df: pd.DataFrame, score_col: str, place_col: str):
     return df
 
 
+def get_zone_source_df(
+    tournament_type: str,
+    top_n_df: pd.DataFrame,
+    total_df: pd.DataFrame,
+) -> pd.DataFrame:
+    return total_df if tournament_type in {"combo", "total"} else top_n_df
+
+
+def get_zone_score_col(tournament_type: str, top_n_value: int) -> str:
+    return "Загальна вага" if tournament_type in {"combo", "total"} else f"Заг. вага по {top_n_value}"
+
+
 def build_results(tournament_id: int):
     meta = get_tournament_meta(tournament_id)
     top_n_value = int(meta.get("top_n", 5)) if meta else 5
@@ -619,12 +632,13 @@ def build_live_scoreboard(tournament_id: int):
     meta = get_tournament_meta(tournament_id)
     top_n_df, total_df, combo_df = build_results(tournament_id)
     top_n_value = int(meta.get("top_n", 5)) if meta else 5
+    tournament_type = meta["tournament_type"] if meta else "topN"
     score_col = f"Заг. вага по {top_n_value}"
-    zone_source = total_df if meta and meta["tournament_type"] == "combo" else top_n_df
-    zone_col = "Загальна вага" if meta and meta["tournament_type"] == "combo" else score_col
+    zone_source = get_zone_source_df(tournament_type, top_n_df, total_df)
+    zone_col = get_zone_score_col(tournament_type, top_n_value)
     zone_df = build_zone_winners(zone_source, zone_col)
 
-    if meta and meta["tournament_type"] == "combo":
+    if tournament_type == "combo":
         winner_teams = zone_df["Команда"].tolist() if not zone_df.empty else []
         board_df = combo_df[combo_df["Команда"].isin(winner_teams)].copy() if winner_teams else combo_df.head(0).copy()
         if not board_df.empty:
@@ -637,9 +651,13 @@ def build_live_scoreboard(tournament_id: int):
         return board_df.head(3), zone_df, top_n_value
 
     winner_teams = zone_df["Команда"].tolist() if not zone_df.empty else []
-    board_df = top_n_df[top_n_df["Команда"].isin(winner_teams)].copy() if winner_teams else top_n_df.head(0).copy()
+    board_source = total_df if tournament_type == "total" else top_n_df
+    board_df = board_source[board_source["Команда"].isin(winner_teams)].copy() if winner_teams else board_source.head(0).copy()
     if not board_df.empty:
-        board_df = board_df.sort_values([score_col, "1 риба", "Команда"], ascending=[False, False, True]).reset_index(drop=True)
+        if tournament_type == "total":
+            board_df = board_df.sort_values(["Загальна вага", "Команда"], ascending=[False, True]).reset_index(drop=True)
+        else:
+            board_df = board_df.sort_values([score_col, "1 риба", "Команда"], ascending=[False, False, True]).reset_index(drop=True)
     return board_df.head(3), zone_df, top_n_value
 
 
@@ -668,8 +686,8 @@ def build_podium(
     tournament_type: str,
     top_n_value: int,
 ) -> pd.DataFrame:
-    zone_source = total_df if tournament_type == "combo" else top_n_df
-    zone_col = "Загальна вага" if tournament_type == "combo" else f"Заг. вага по {top_n_value}"
+    zone_source = get_zone_source_df(tournament_type, top_n_df, total_df)
+    zone_col = get_zone_score_col(tournament_type, top_n_value)
     zone_winners_df = build_zone_winners(zone_source, zone_col)
     winner_teams = zone_winners_df["Команда"].tolist() if not zone_winners_df.empty else []
 
@@ -684,6 +702,14 @@ def build_podium(
         ).head(3).reset_index(drop=True)
         podium.insert(0, "Місце", ["1 місце", "2 місце", "3 місце"][: len(podium)])
         return podium[["Місце", "Команда", "Сума балів"]].rename(columns={"Сума балів": "Бали"})
+
+    if tournament_type == "total":
+        if total_df.empty or not winner_teams:
+            return pd.DataFrame(columns=["Місце", "Команда", "Вага"])
+        podium = total_df[total_df["Команда"].isin(winner_teams)].copy()
+        podium = podium.sort_values(["Загальна вага", "Команда"], ascending=[False, True]).head(3).reset_index(drop=True)
+        podium.insert(0, "Місце", ["1 місце", "2 місце", "3 місце"][: len(podium)])
+        return podium[["Місце", "Команда", "Загальна вага"]].rename(columns={"Загальна вага": "Вага"})
 
     score_col = f"Заг. вага по {top_n_value}"
     first_fish_col = "1 риба"

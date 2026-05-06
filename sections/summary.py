@@ -1,18 +1,27 @@
 import streamlit as st
 
-from db import build_big_fish, build_period_zone_winners, build_podium, build_results, build_zone_winners
+from db import (
+    build_big_fish,
+    build_period_zone_winners,
+    build_podium,
+    build_results,
+    build_zone_winners,
+    get_zone_score_col,
+    get_zone_source_df,
+)
 
 
 def render_summary_page(active_meta: dict, active_tournament_id: int):
     st.subheader(f"Підсумки — {active_meta['name']}")
     top_n_df, total_df, combo_df = build_results(active_tournament_id)
     top_n_value = int(active_meta.get("top_n", 5))
+    tournament_type = active_meta["tournament_type"]
 
-    zone_source = total_df if active_meta["tournament_type"] == "combo" else top_n_df
-    zone_col = "Загальна вага" if active_meta["tournament_type"] == "combo" else f"Заг. вага по {top_n_value}"
+    zone_source = get_zone_source_df(tournament_type, top_n_df, total_df)
+    zone_col = get_zone_score_col(tournament_type, top_n_value)
     zone_df = build_zone_winners(zone_source, zone_col)
     big_fish_df = build_big_fish(active_tournament_id)
-    podium_df = build_podium(top_n_df, total_df, combo_df, active_meta["tournament_type"], top_n_value)
+    podium_df = build_podium(top_n_df, total_df, combo_df, tournament_type, top_n_value)
 
     summary_tabs = st.tabs(["Зони", "Big Fish", "Подіум", "Номінація періодів"])
 
